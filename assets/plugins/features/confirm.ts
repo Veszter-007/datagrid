@@ -4,25 +4,88 @@ import { DatagridPlugin } from "../../types";
 export const ConfirmAttribute = "data-datagrid-confirm";
 
 export class ConfirmPlugin implements DatagridPlugin {
-	onDatagridInit(datagrid: Datagrid): boolean {
-		datagrid.el
-			.querySelectorAll<HTMLElement>(`[${ConfirmAttribute}]:not(.ajax)`)
-			.forEach(confirmEl =>
-				confirmEl.addEventListener("click", e => this.confirmEventHandler.bind(datagrid)(e.target as HTMLElement, e))
-			);
+    private datagrid!: Datagrid;
 
-		datagrid.ajax.addEventListener("interact", e => this.confirmEventHandler.bind(datagrid)(e.detail.element, e));
+    private modalId = 'datagridConfirmModal';
+    private messageBoxId = 'datagridConfirmMessage';
+    private confirmButtonId = 'datagridConfirmOk';
 
-		return true;
-	}
+    onDatagridInit(datagrid: Datagrid): boolean {
+        this.datagrid = datagrid;
 
-	confirmEventHandler(this: Datagrid, el: HTMLElement, e: Event) {
-		const message = el.closest('a')?.getAttribute(ConfirmAttribute)!;
-		if (!message) return;
+        const confirmElements = datagrid.el.querySelectorAll<HTMLElement>(`[${ConfirmAttribute}]:not(.ajax)`);
+        confirmElements.forEach(el => el.addEventListener("click", e => this.handleClick(el, e)));
 
-		if (!window.confirm.bind(window)(message)) {
-			e.stopPropagation();
-			e.preventDefault();
+        datagrid.ajax.addEventListener("interact", e => {
+            const target = e.detail.element;
+            if (datagrid.el.contains(target)) {
+                this.handleClick(target, e);
+            }
+        });
+
+        return true;
+    }
+
+    private handleClick(el: HTMLElement, e: Event): void {
+        const message = this.getConfirmationMessage(el);
+        if (!message) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const modal = this.getElement(this.modalId);
+        if (modal) {
+            this.showModalConfirm(modal, message, el, e);
+        } else {
+            if (!window.confirm(message)) {
+                e.preventDefault();
+                e.stopPropagation();
+            } else {
+                this.executeConfirmedAction(el, e);
+            }
+        }
+    }
+
+    private getConfirmationMessage(el: HTMLElement): string | null {
+        return el.closest('a')?.getAttribute(ConfirmAttribute) ?? null;
+    }
+
+    private showModalConfirm(modal: HTMLElement, message: string, el: HTMLElement, e: Event): void {
+        const messageBox = this.getElement(this.messageBoxId);
+        const confirmButton = this.getElement(this.confirmButtonId);
+
+        if (!messageBox || !confirmButton) return;
+
+        messageBox.textContent = message;
+
+        const newButton = confirmButton.cloneNode(true) as HTMLElement;
+        confirmButton.parentNode!.replaceChild(newButton, confirmButton);
+
+        newButton.addEventListener("click", () => {
+            bootstrap.Modal.getInstance(modal)?.hide();
+            this.executeConfirmedAction(el, e);
+        }, { once: true });
+
+        new bootstrap.Modal(modal).show();
+    }
+
+	private executeConfirmedAction(el: HTMLElement, e?: Event): void {
+		const detail = (e instanceof CustomEvent) ? e.detail : null;
+
+		if (el instanceof HTMLAnchorElement && el.href) {
+			const isAjax = el.classList.contains('ajax');
+			if (isAjax && detail) {
+				const options = { ...detail.options, history: false };
+				naja.makeRequest(detail.method, detail.url, detail.payload, options);
+			} else {
+				window.location.href = el.href;
+			}
+		} else {
+			el.click();
 		}
 	}
+
+    private getElement(id: string): HTMLElement | null {
+        return document.getElementById(id);
+    }
 }
